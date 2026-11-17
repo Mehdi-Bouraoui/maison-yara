@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Maison Yara · Fiche de création</title>
+<style>
+  :root { --bordeaux:#6D1F2B; --beige:#F3EEE6; --creme:#FBF8F3; --gris:#7A6E66; --rouge:#B00020; --texte:#2B2523; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--creme); color:var(--texte); font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.45; }
+  header { background:var(--bordeaux); color:#fff; padding:22px 18px 18px; text-align:center; }
+  header .marque { font-family:Georgia,"Times New Roman",serif; font-size:26px; letter-spacing:1px; }
+  header .sous { opacity:.85; font-size:14px; margin-top:2px; }
+  main { max-width:640px; margin:0 auto; padding:16px 14px 40px; }
+  .carte { background:#fff; border:1px solid #E6DED3; border-radius:12px; margin-bottom:14px; overflow:hidden; }
+  .carte h2 { margin:0; padding:10px 14px; background:var(--bordeaux); color:#fff; font-size:15px; font-weight:600; letter-spacing:.3px; }
+  .carte.principale h2 { font-family:Georgia,"Times New Roman",serif; font-size:20px; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:9px 14px; vertical-align:top; font-size:15px; }
+  tr:nth-child(odd) td { background:var(--creme); }
+  tr:nth-child(even) td { background:var(--beige); }
+  td.info { width:42%; font-weight:600; color:var(--gris); }
+  .alerte { color:var(--rouge); font-weight:700; }
+  .message { text-align:center; padding:40px 16px; color:var(--gris); }
+  .pied { text-align:center; color:var(--gris); font-size:12px; margin-top:18px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="marque">Maison Yara</div>
+  <div class="sous">Fiche technique de la création</div>
+</header>
+<main id="contenu">
+  <div class="message">Chargement de la fiche…</div>
+</main>
+
+<script>
+// ------------------------------------------------------------------
+// Les infos de la creation sont dans le lien, apres le # :
+// texte -> compresse (zlib) -> base64 « url ». Ici on fait le chemin inverse.
+// ------------------------------------------------------------------
+
+// lien (#...) -> texte de la fiche
+async function decoderLien(hash) {
+  let b64 = hash.replace(/^#/, '').replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const binaire = atob(b64);
+  const octets = Uint8Array.from(binaire, c => c.charCodeAt(0));
+  const flux = new Blob([octets]).stream().pipeThrough(new DecompressionStream('deflate'));
+  const resultat = await new Response(flux).arrayBuffer();
+  return new TextDecoder('utf-8').decode(resultat);
+}
+
+// texte de la fiche -> { titre, sections: [ { nom, lignes: [ [info, valeur] ] } ] }
+// le texte ressemble a :  « Référence : CR001 »  et  « -- Entretien -- »
+function analyserTexte(texte) {
+  const fiche = { titre: '', sections: [{ nom: '', lignes: [] }] };
+  texte.split('\n').forEach(function (ligne) {
+    ligne = ligne.trim();
+    if (ligne === '') return;
+    const section = ligne.match(/^--\s*(.+?)\s*--$/);
+    if (section) {
+      fiche.sections.push({ nom: section[1], lignes: [] });
+      return;
+    }
+    const position = ligne.indexOf(' : ');
+    if (position < 0) {
+      fiche.titre = ligne; // « MAISON YARA - Fiche technique »
+      return;
+    }
+    const derniere = fiche.sections[fiche.sections.length - 1];
+    derniere.lignes.push([ligne.slice(0, position), ligne.slice(position + 3)]);
+  });
+  return fiche;
+}
+
+// une valeur a mettre en rouge ? (retard, non conforme...)
+function estAlerte(info, valeur) {
+  const t = (info + ' ' + valeur).toLowerCase();
+  return t.indexOf('non conforme') >= 0 || t.indexOf('retard') >= 0 || t.indexOf('à reprendre') >= 0;
+}
+
+function afficher() {
+  const zone = document.getElementById('contenu');
+  const montrer = function (message) {
+    zone.innerHTML = '';
+    const d = document.createElement('div');
+    d.className = 'message';
+    d.textContent = message;
+    zone.appendChild(d);
+  };
+
+  if (!location.hash || location.hash.length < 5) {
+    montrer('Aucune création à afficher. Scannez le code QR d’une création depuis l’application Maison Yara.');
+    return;
+  }
+  if (typeof DecompressionStream === 'undefined') {
+    montrer('Votre navigateur est trop ancien pour afficher cette fiche. Mettez-le à jour (Chrome, Safari, Firefox récents).');
+    return;
+  }
+
+  decoderLien(location.hash).then(function (texte) {
+    const fiche = analyserTexte(texte);
+    zone.innerHTML = '';
+    fiche.sections.forEach(function (section, numero) {
+      if (section.lignes.length === 0) return;
+      const carte = document.createElement('div');
+      carte.className = 'carte' + (numero === 0 ? ' principale' : '');
+      const titre = document.createElement('h2');
+      if (numero === 0) {
+        const sansAccent = function (t) { return t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); };
+        const ref = section.lignes.find(function (l) { return sansAccent(l[0]).indexOf('ref') === 0; });
+        const nom = section.lignes.find(function (l) { return sansAccent(l[0]).indexOf('nom') === 0; });
+        titre.textContent = (ref ? ref[1] : 'Création') + (nom ? ' · ' + nom[1] : '');
+        document.title = 'Maison Yara · ' + titre.textContent;
+      } else {
+        titre.textContent = section.nom;
+      }
+      carte.appendChild(titre);
+      const tableau = document.createElement('table');
+      section.lignes.forEach(function (l) {
+        const tr = document.createElement('tr');
+        const tdInfo = document.createElement('td');
+        tdInfo.className = 'info';
+        tdInfo.textContent = l[0];
+        const tdValeur = document.createElement('td');
+        tdValeur.textContent = l[1];
+        if (estAlerte(l[0], l[1])) tdValeur.className = 'alerte';
+        tr.appendChild(tdInfo);
+        tr.appendChild(tdValeur);
+        tableau.appendChild(tr);
+      });
+      carte.appendChild(tableau);
+      zone.appendChild(carte);
+    });
+    const pied = document.createElement('div');
+    pied.className = 'pied';
+    pied.textContent = 'Valeurs indicatives calculées d’après le barème de l’atelier.';
+    zone.appendChild(pied);
+  }).catch(function () {
+    montrer('Ce lien est incomplet ou abîmé : impossible de lire la fiche. Générez de nouveau le code QR.');
+  });
+}
+
+if (typeof document !== 'undefined') afficher();
+if (typeof globalThis !== 'undefined') globalThis.__fiche = { decoderLien: decoderLien, analyserTexte: analyserTexte, estAlerte: estAlerte };
+</script>
+</body>
+</html>
